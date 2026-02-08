@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node api/index.js",
     "dev": "node api/index.js",
-    "server": "node api/index.js"
+    "build": "echo 'Build completed'",
+    "vercel-build": "echo 'Vercel build completed'"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
