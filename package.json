@@ -1,0 +1,25 @@
+{
+  "name": "neuro-knowledge-base",
+  "version": "1.0.0",
+  "description": "Knowledge base web application for neural network learning materials",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js",
+    "dev": "node api/index.js",
+    "server": "node api/index.js"
+  },
+  "dependencies": {
+    "express": "^4.22.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "knowledge-base",
+    "neural-networks"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

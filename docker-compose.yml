@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  web:
+    image: php:8.1-apache
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/var/www/html
+    working_dir: /var/www/html
+    command: >
+      bash -c "
+        docker-php-ext-install pdo pdo_sqlite &&
+        apache2-foreground
+      "

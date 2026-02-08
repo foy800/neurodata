@@ -1,0 +1,52 @@
+<%- include('layout', { title: 'Регистрация', user: null }) %>
+
+<div class="auth-container">
+    <div class="auth-card">
+        <h2>Регистрация</h2>
+        
+        <% if (error) { %>
+            <div class="error-message"><%= error %></div>
+        <% } %>
+        
+        <% if (success) { %>
+            <div class="success-message"><%= success %></div>
+            <p class="auth-link">
+                <a href="/login">Войти в систему</a>
+            </p>
+        <% } else { %>
+            <form method="POST" class="auth-form">
+                <div class="form-group">
+                    <label for="username">Имя пользователя *:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email *:</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="full_name">Полное имя:</label>
+                    <input type="text" id="full_name" name="full_name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Пароль *:</label>
+                    <input type="password" id="password" name="password" required>
+                    <small>Минимум 6 символов</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="confirm_password">Подтверждение пароля *:</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
+            </form>
+            
+            <p class="auth-link">
+                Уже есть аккаунт? <a href="/login">Войти</a>
+            </p>
+        <% } %>
+    </div>
+</div>

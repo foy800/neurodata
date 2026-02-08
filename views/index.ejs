@@ -1,0 +1,11 @@
+<%- include('layout', { title: 'Главная', user: user }) %>
+
+<div class="categories-grid">
+    <% categories.forEach(category => { %>
+        <div class="category-card">
+            <h3><%= category.name %></h3>
+            <p><%= category.description %></p>
+            <a href="/category/<%= category.id %>" class="btn">Перейти</a>
+        </div>
+    <% }) %>
+</div>

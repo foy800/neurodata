@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> - База знаний по нейросетям</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <h1>База знаний по нейросетям</h1>
+            <nav class="nav">
+                <% if (user && user.admin_logged_in) { %>
+                    <a href="/admin" class="nav-link">Админ панель</a>
+                <% } %>
+                <% if (user && (user.user_id || user.admin_logged_in)) { %>
+                    <a href="/profile" class="nav-link">Профиль</a>
+                    <a href="/chat" class="nav-link">Чат</a>
+                    <a href="/logout" class="nav-link">Выход</a>
+                <% } else { %>
+                    <a href="/login" class="nav-link">Вход</a>
+                    <a href="/register" class="nav-link">Регистрация</a>
+                <% } %>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <%- body %>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 База знаний по нейросетям</p>
+        </div>
+    </footer>
+</body>
+</html>
