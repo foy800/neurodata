@@ -2,7 +2,20 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const db = require('../database/db');
+const fs = require('fs');
+
+// Определяем, какую базу данных использовать
+let db;
+if (process.env.NODE_ENV === 'production') {
+  // В продакшене используем базу данных в памяти
+  console.log('Используем базу данных в памяти для Vercel');
+  db = require('./memory-db');
+} else {
+  // Локально используем файловую базу данных
+  console.log('Используем файловую базу данных SQLite');
+  db = require('../database/db');
+}
+
 const debugRoutes = require('./debug');
 
 const app = express();
@@ -163,14 +176,64 @@ app.get('/login', (req, res) => {
         .btn:hover { background: #5a6fd8; }
         .error-message { background-color: #f8d7da; color: #721c24; padding: 0.75rem; border-radius: 5px; margin-bottom: 1rem; }
       </style>
+      <script>
+        // Функция для входа через API
+        function login() {
+          const username = document.getElementById('username').value;
+          const password = document.getElementById('password').value;
+          
+          if (!username || !password) {
+            showError('Пожалуйста, заполните все поля');
+            return false;
+          }
+          
+          // Отправляем запрос на сервер
+          fetch('/api/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ username, password }),
+            credentials: 'include'
+          })
+          .then(response => {
+            if (response.redirected) {
+              window.location.href = response.url;
+            } else {
+              return response.json();
+            }
+          })
+          .then(data => {
+            if (data && data.error) {
+              showError(data.error);
+            } else if (data && data.redirect) {
+              window.location.href = data.redirect;
+            }
+          })
+          .catch(error => {
+            console.error('Ошибка:', error);
+            showError('Произошла ошибка при входе. Пожалуйста, попробуйте еще раз.');
+          });
+          
+          return false;
+        }
+        
+        // Функция для отображения ошибки
+        function showError(message) {
+          const errorDiv = document.getElementById('error-message');
+          errorDiv.textContent = message;
+          errorDiv.style.display = 'block';
+        }
+      </script>
     </head>
     <body>
       <div class="auth-container">
         <div class="auth-card">
           <h2>Вход в систему</h2>
+          <div id="error-message" class="error-message" style="display: none;"></div>
           ${req.query.error ? `<div class="error-message">${req.query.error}</div>` : ''}
           ${req.query.blocked ? `<div class="error-message">Ваш аккаунт заблокирован. Обратитесь к администратору.</div>` : ''}
-          <form method="POST" action="/api/login" class="auth-form">
+          <form onsubmit="return login();" class="auth-form">
             <div class="form-group">
               <label for="username">Имя пользователя:</label>
               <input type="text" id="username" name="username" required>
@@ -722,8 +785,10 @@ app.get('/admin', requireAdmin, (req, res) => {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   
+  console.log('Попытка входа:', { username, hasPassword: !!password });
+  
   if (!username || !password) {
-    return res.redirect('/login?error=Пожалуйста, заполните все поля');
+    return res.status(400).json({ error: 'Пожалуйста, заполните все поля' });
   }
   
   // Проверяем, является ли пользователь администратором
@@ -731,7 +796,7 @@ app.post('/api/login', (req, res) => {
     db.get("SELECT * FROM users WHERE username = ? AND is_admin = 1", [username], (err, user) => {
       if (err) {
         console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
+        return res.status(500).json({ error: 'Ошибка сервера' });
       }
       
       console.log('Попытка входа администратора:', user);
@@ -744,11 +809,19 @@ app.post('/api/login', (req, res) => {
         
         console.log('Сессия администратора:', req.session);
         
-        return res.redirect('/admin');
+        // Сохраняем сессию перед отправкой ответа
+        req.session.save((err) => {
+          if (err) {
+            console.error('Ошибка при сохранении сессии:', err);
+            return res.status(500).json({ error: 'Ошибка сервера при сохранении сессии' });
+          }
+          
+          return res.json({ success: true, redirect: '/admin' });
+        });
+      } else {
+        console.log('Аутентификация администратора не удалась');
+        res.status(401).json({ error: 'Неверное имя пользователя или пароль' });
       }
-      
-      console.log('Аутентификация администратора не удалась');
-      res.redirect('/login?error=Неверное имя пользователя или пароль');
     });
     return;
   }
@@ -757,19 +830,28 @@ app.post('/api/login', (req, res) => {
   db.get("SELECT * FROM users WHERE username = ? AND is_admin = 0", [username], (err, user) => {
     if (err) {
       console.error('Ошибка базы данных:', err);
-      return res.status(500).send('Ошибка сервера');
+      return res.status(500).json({ error: 'Ошибка сервера' });
     }
     
     if (user && bcrypt.compareSync(password, user.password)) {
       if (user.is_blocked) {
-        return res.redirect('/login?blocked=1');
+        return res.status(403).json({ error: 'Ваш аккаунт заблокирован. Обратитесь к администратору.' });
       }
       
       req.session.user_id = user.id;
       req.session.username = user.username;
-      res.redirect('/');
+      
+      // Сохраняем сессию перед отправкой ответа
+      req.session.save((err) => {
+        if (err) {
+          console.error('Ошибка при сохранении сессии:', err);
+          return res.status(500).json({ error: 'Ошибка сервера при сохранении сессии' });
+        }
+        
+        res.json({ success: true, redirect: '/' });
+      });
     } else {
-      res.redirect('/login?error=Неверное имя пользователя или пароль');
+      res.status(401).json({ error: 'Неверное имя пользователя или пароль' });
     }
   });
 });
