@@ -9,7 +9,10 @@
     "server": "node api/index.js"
   },
   "dependencies": {
-    "express": "^4.22.1"
+    "bcryptjs": "^3.0.3",
+    "express": "^4.22.1",
+    "express-session": "^1.19.0",
+    "sqlite3": "^5.1.7"
   },
   "engines": {
     "node": ">=14.0.0"
