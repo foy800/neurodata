@@ -3,6 +3,7 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const db = require('../database/db');
+const debugRoutes = require('./debug');
 
 const app = express();
 
@@ -17,8 +18,10 @@ app.use(session({
   resave: true,
   saveUninitialized: true,
   cookie: { 
-    secure: false,
-    maxAge: 24 * 60 * 60 * 1000 // 24 часа
+    secure: process.env.NODE_ENV === 'production', // В продакшене используем secure cookies
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000, // 24 часа
+    sameSite: 'lax'
   }
 }));
 
@@ -33,6 +36,16 @@ function requireAuth(req, res, next) {
 // Middleware для проверки прав администратора
 function requireAdmin(req, res, next) {
   console.log('Проверка прав администратора:', req.session);
+  
+  // Проверка на наличие специального параметра для отладки (только для разработки)
+  if (req.query.admin_debug === 'true' && process.env.NODE_ENV !== 'production') {
+    console.log('Доступ разрешен через параметр отладки');
+    req.session.admin_logged_in = true;
+    req.session.admin_id = 1;
+    req.session.username = 'admin';
+    return next();
+  }
+  
   if (!req.session.admin_logged_in) {
     console.log('Доступ запрещен: не администратор');
     return res.redirect('/login');
@@ -820,6 +833,27 @@ app.get('/logout', (req, res) => {
   });
 });
 
+// Специальный маршрут для прямого входа администратора (только для разработки)
+app.get('/admin-login', (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).send('Страница не найдена');
+  }
+  
+  db.get("SELECT * FROM users WHERE username = 'admin' AND is_admin = 1", (err, user) => {
+    if (err || !user) {
+      console.error('Ошибка при поиске администратора:', err || 'Администратор не найден');
+      return res.status(500).send('Ошибка сервера');
+    }
+    
+    req.session.admin_logged_in = true;
+    req.session.admin_id = user.id;
+    req.session.username = user.username;
+    
+    console.log('Прямой вход администратора выполнен успешно');
+    res.redirect('/admin');
+  });
+});
+
 // API для управления пользователями (админ)
 app.post('/api/admin/users', requireAdmin, (req, res) => {
   const { user_id, action } = req.body;
@@ -952,6 +986,9 @@ app.use((err, req, res, next) => {
   console.error('Ошибка:', err);
   res.status(500).send('Внутренняя ошибка сервера');
 });
+
+// Маршруты отладки
+app.use('/debug', debugRoutes);
 
 // Обработка 404
 app.use((req, res) => {
