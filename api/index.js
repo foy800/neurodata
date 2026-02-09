@@ -3,18 +3,13 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
+const dotenv = require('dotenv');
 
-// Определяем, какую базу данных использовать
-let db;
-if (process.env.NODE_ENV === 'production') {
-  // В продакшене используем базу данных в памяти
-  console.log('Используем базу данных в памяти для Vercel');
-  db = require('./memory-db');
-} else {
-  // Локально используем файловую базу данных
-  console.log('Используем файловую базу данных SQLite');
-  db = require('../database/db');
-}
+// Загружаем переменные окружения
+dotenv.config();
+
+// Импортируем базу данных Turso
+const db = require('../database/turso-db');
 
 const debugRoutes = require('./debug');
 
@@ -68,12 +63,9 @@ function requireAdmin(req, res, next) {
 }
 
 // Главная страница
-app.get('/', requireAuth, (req, res) => {
-  db.all("SELECT * FROM categories ORDER BY name", (err, categories) => {
-    if (err) {
-      console.error('Ошибка базы данных:', err);
-      return res.status(500).send('Ошибка сервера');
-    }
+app.get('/', requireAuth, async (req, res) => {
+  try {
+    const categories = await db.getAllCategories();
     
     res.send(`
       <!DOCTYPE html>
@@ -142,7 +134,10 @@ app.get('/', requireAuth, (req, res) => {
       </body>
       </html>
     `);
-  });
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.status(500).send('Ошибка сервера');
+  }
 });
 
 // Страница входа
@@ -284,155 +279,117 @@ app.get('/register', (req, res) => {
 });
 
 // Страница категории
-app.get('/category/:id', requireAuth, (req, res) => {
+app.get('/category/:id', requireAuth, async (req, res) => {
   const categoryId = req.params.id;
   
-  // Получаем информацию о категории
-  db.get("SELECT * FROM categories WHERE id = ?", [categoryId], (err, category) => {
-    if (err) {
-      console.error('Ошибка базы данных:', err);
-      return res.status(500).send('Ошибка сервера');
-    }
+  try {
+    // Получаем информацию о категории
+    const category = await db.getCategoryById(categoryId);
     
     if (!category) {
       return res.status(404).send('Категория не найдена');
     }
     
     // Получаем материалы категории
-    db.all(`
-      SELECT m.*, u.username as author_name 
-      FROM materials m 
-      JOIN users u ON m.author_id = u.id 
-      WHERE m.category_id = ? 
-      ORDER BY m.created_at DESC
-    `, [categoryId], (err, materials) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
-      }
-      
-      res.send(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>${category.name}</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f8f9fa; }
-            .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            .header .container { display: flex; justify-content: space-between; align-items: center; }
-            .header h1 { font-size: 1.8rem; font-weight: 600; }
-            .nav { display: flex; gap: 1.5rem; }
-            .nav-link { color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 5px; transition: background-color 0.3s; }
-            .nav-link:hover { background-color: rgba(255,255,255,0.2); }
-            .main { min-height: calc(100vh - 120px); padding: 2rem 0; }
-            .category-container { max-width: 1000px; margin: 0 auto; }
-            .category-header { text-align: center; margin-bottom: 2rem; }
-            .category-header h2 { color: #333; margin-bottom: 0.5rem; }
-            .materials-list { display: flex; flex-direction: column; gap: 1.5rem; }
-            .material-card { background: white; padding: 2rem; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            .material-header { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #e9ecef; }
-            .material-header h3 { color: #333; margin-bottom: 0.5rem; }
-            .material-meta { display: flex; gap: 1rem; font-size: 0.9rem; color: #666; }
-            .material-content { line-height: 1.8; color: #555; }
-            .footer { background: #333; color: white; text-align: center; padding: 1.5rem 0; margin-top: 3rem; }
-            .admin-link { background-color: #ff5722; }
-            .admin-link:hover { background-color: #e64a19; }
-          </style>
-        </head>
-        <body>
-          <header class="header">
-            <div class="container">
-              <h1>${category.name}</h1>
-              <nav class="nav">
-                <a href="/" class="nav-link">Главная</a>
-                ${req.session.admin_logged_in ? '<a href="/admin" class="nav-link admin-link">Админ-панель</a>' : ''}
-                <a href="/logout" class="nav-link">Выход</a>
-              </nav>
-            </div>
-          </header>
-          <main class="main">
-            <div class="container">
-              <div class="category-container">
-                <div class="category-header">
-                  <h2>${category.name}</h2>
-                  <p>${category.description}</p>
-                </div>
-                <div class="materials-list">
-                  ${materials.length > 0 ? materials.map(material => `
-                    <div class="material-card">
-                      <div class="material-header">
-                        <h3>${material.title}</h3>
-                        <div class="material-meta">
-                          <span class="author">Автор: ${material.author_name}</span>
-                          <span class="date">${new Date(material.created_at).toLocaleDateString('ru-RU')}</span>
-                        </div>
-                      </div>
-                      <div class="material-content">
-                        <p>${material.content}</p>
+    const materials = await db.getMaterialsByCategoryId(categoryId);
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="ru">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${category.name}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f8f9fa; }
+          .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .header .container { display: flex; justify-content: space-between; align-items: center; }
+          .header h1 { font-size: 1.8rem; font-weight: 600; }
+          .nav { display: flex; gap: 1.5rem; }
+          .nav-link { color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 5px; transition: background-color 0.3s; }
+          .nav-link:hover { background-color: rgba(255,255,255,0.2); }
+          .main { min-height: calc(100vh - 120px); padding: 2rem 0; }
+          .category-container { max-width: 1000px; margin: 0 auto; }
+          .category-header { text-align: center; margin-bottom: 2rem; }
+          .category-header h2 { color: #333; margin-bottom: 0.5rem; }
+          .materials-list { display: flex; flex-direction: column; gap: 1.5rem; }
+          .material-card { background: white; padding: 2rem; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .material-header { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #e9ecef; }
+          .material-header h3 { color: #333; margin-bottom: 0.5rem; }
+          .material-meta { display: flex; gap: 1rem; font-size: 0.9rem; color: #666; }
+          .material-content { line-height: 1.8; color: #555; }
+          .footer { background: #333; color: white; text-align: center; padding: 1.5rem 0; margin-top: 3rem; }
+          .admin-link { background-color: #ff5722; }
+          .admin-link:hover { background-color: #e64a19; }
+        </style>
+      </head>
+      <body>
+        <header class="header">
+          <div class="container">
+            <h1>${category.name}</h1>
+            <nav class="nav">
+              <a href="/" class="nav-link">Главная</a>
+              ${req.session.admin_logged_in ? '<a href="/admin" class="nav-link admin-link">Админ-панель</a>' : ''}
+              <a href="/logout" class="nav-link">Выход</a>
+            </nav>
+          </div>
+        </header>
+        <main class="main">
+          <div class="container">
+            <div class="category-container">
+              <div class="category-header">
+                <h2>${category.name}</h2>
+                <p>${category.description}</p>
+              </div>
+              <div class="materials-list">
+                ${materials.length > 0 ? materials.map(material => `
+                  <div class="material-card">
+                    <div class="material-header">
+                      <h3>${material.title}</h3>
+                      <div class="material-meta">
+                        <span class="author">Автор: ${material.author_name}</span>
+                        <span class="date">${new Date(material.created_at).toLocaleDateString('ru-RU')}</span>
                       </div>
                     </div>
-                  `).join('') : '<p>В этой категории пока нет материалов.</p>'}
-                </div>
+                    <div class="material-content">
+                      <p>${material.content}</p>
+                    </div>
+                  </div>
+                `).join('') : '<p>В этой категории пока нет материалов.</p>'}
               </div>
             </div>
-          </main>
-          <footer class="footer">
-            <div class="container">
-              <p>&copy; 2024 База знаний по нейросетям</p>
-            </div>
-          </footer>
-        </body>
-        </html>
-      `);
-    });
-  });
+          </div>
+        </main>
+        <footer class="footer">
+          <div class="container">
+            <p>&copy; 2024 База знаний по нейросетям</p>
+          </div>
+        </footer>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.status(500).send('Ошибка сервера');
+  }
 });
 
 // Административная панель
-app.get('/admin', requireAdmin, (req, res) => {
-  // Получаем статистику
-  db.get(`
-    SELECT 
-      (SELECT COUNT(*) FROM users WHERE is_admin = 0) as total_users,
-      (SELECT COUNT(*) FROM users WHERE is_blocked = 1) as blocked_users,
-      (SELECT COUNT(*) FROM materials) as total_materials,
-      (SELECT COUNT(*) FROM messages) as total_messages
-  `, (err, stats) => {
-    if (err) {
-      console.error('Ошибка базы данных:', err);
-      return res.status(500).send('Ошибка сервера');
-    }
+app.get('/admin', requireAdmin, async (req, res) => {
+  try {
+    // Получаем статистику
+    const stats = await db.getStats();
     
     // Получаем список пользователей
-    db.all("SELECT * FROM users WHERE is_admin = 0 ORDER BY created_at DESC", (err, users) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
-      }
-      
-      // Получаем список категорий
-      db.all("SELECT * FROM categories ORDER BY name", (err, categories) => {
-        if (err) {
-          console.error('Ошибка базы данных:', err);
-          return res.status(500).send('Ошибка сервера');
-        }
-        
-        // Получаем список материалов
-        db.all(`
-          SELECT m.*, c.name as category_name, u.username as author_name 
-          FROM materials m 
-          JOIN categories c ON m.category_id = c.id 
-          JOIN users u ON m.author_id = u.id 
-          ORDER BY m.created_at DESC
-        `, (err, materials) => {
-          if (err) {
-            console.error('Ошибка базы данных:', err);
-            return res.status(500).send('Ошибка сервера');
-          }
+    const users = await db.getAllUsers();
+    
+    // Получаем список категорий
+    const categories = await db.getAllCategories();
+    
+    // Получаем список материалов
+    const materials = await db.getAllMaterials();
           
           res.send(`
             <!DOCTYPE html>
@@ -737,7 +694,7 @@ app.get('/admin', requireAdmin, (req, res) => {
 });
 
 // API для входа
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   
   console.log('Попытка входа:', { username, hasPassword: !!password });
@@ -746,17 +703,14 @@ app.post('/api/login', (req, res) => {
     return res.redirect('/login?error=Пожалуйста, заполните все поля');
   }
   
-  // Проверяем, является ли пользователь администратором
-  if (username === 'admin') {
-    db.get("SELECT * FROM users WHERE username = ? AND is_admin = 1", [username], (err, user) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.redirect('/login?error=Ошибка сервера');
-      }
+  try {
+    // Проверяем, является ли пользователь администратором
+    if (username === 'admin') {
+      const user = await db.getUserByUsername(username);
       
       console.log('Попытка входа администратора:', user);
       
-      if (user && bcrypt.compareSync(password, user.password)) {
+      if (user && user.is_admin && bcrypt.compareSync(password, user.password)) {
         console.log('Аутентификация администратора успешна');
         req.session.admin_logged_in = true;
         req.session.admin_id = user.id;
@@ -777,18 +731,13 @@ app.post('/api/login', (req, res) => {
         console.log('Аутентификация администратора не удалась');
         res.redirect('/login?error=Неверное имя пользователя или пароль');
       }
-    });
-    return;
-  }
-  
-  // Проверяем обычного пользователя
-  db.get("SELECT * FROM users WHERE username = ? AND is_admin = 0", [username], (err, user) => {
-    if (err) {
-      console.error('Ошибка базы данных:', err);
-      return res.redirect('/login?error=Ошибка сервера');
+      return;
     }
     
-    if (user && bcrypt.compareSync(password, user.password)) {
+    // Проверяем обычного пользователя
+    const user = await db.getUserByUsername(username);
+    
+    if (user && !user.is_admin && bcrypt.compareSync(password, user.password)) {
       if (user.is_blocked) {
         return res.redirect('/login?blocked=1');
       }
@@ -808,11 +757,14 @@ app.post('/api/login', (req, res) => {
     } else {
       res.redirect('/login?error=Неверное имя пользователя или пароль');
     }
-  });
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.redirect('/login?error=Ошибка сервера');
+  }
 });
 
 // API для регистрации
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, email, full_name, password, confirm_password } = req.body;
   
   if (!username || !email || !password || !confirm_password) {
@@ -827,37 +779,40 @@ app.post('/api/register', (req, res) => {
     return res.redirect('/register?error=Пароль должен содержать не менее 6 символов');
   }
   
-  // Проверяем, существует ли пользователь с таким именем или email
-  db.get("SELECT * FROM users WHERE username = ? OR email = ?", [username, email], (err, user) => {
-    if (err) {
-      console.error('Ошибка базы данных:', err);
-      return res.status(500).send('Ошибка сервера');
+  try {
+    // Проверяем, существует ли пользователь с таким именем
+    const existingUser = await db.getUserByUsername(username);
+    
+    if (existingUser) {
+      return res.redirect('/register?error=Пользователь с таким именем уже существует');
     }
     
-    if (user) {
-      if (user.username === username) {
-        return res.redirect('/register?error=Пользователь с таким именем уже существует');
-      } else {
-        return res.redirect('/register?error=Пользователь с таким email уже существует');
-      }
+    // Проверяем, существует ли пользователь с таким email
+    const result = await db.query("SELECT * FROM users WHERE email = ?", [email]);
+    if (result.rows.length > 0) {
+      return res.redirect('/register?error=Пользователь с таким email уже существует');
     }
     
     // Создаем нового пользователя
-    const hashedPassword = bcrypt.hashSync(password, 10);
+    const userId = await db.createUser(username, email, password, full_name || null);
     
-    db.run("INSERT INTO users (username, email, full_name, password) VALUES (?, ?, ?, ?)", 
-      [username, email, full_name || null, hashedPassword], function(err) {
+    // Автоматически входим в систему
+    req.session.user_id = userId;
+    req.session.username = username;
+    
+    // Сохраняем сессию перед отправкой ответа
+    req.session.save((err) => {
       if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
+        console.error('Ошибка при сохранении сессии:', err);
+        return res.redirect('/register?error=Ошибка сервера при сохранении сессии');
       }
       
-      // Автоматически входим в систему
-      req.session.user_id = this.lastID;
-      req.session.username = username;
       res.redirect('/');
     });
-  });
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.redirect('/register?error=Ошибка сервера');
+  }
 });
 
 // API для выхода
@@ -892,129 +847,100 @@ app.get('/admin-login', (req, res) => {
 });
 
 // API для управления пользователями (админ)
-app.post('/api/admin/users', requireAdmin, (req, res) => {
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
   const { user_id, action } = req.body;
   
   if (!user_id || !action) {
     return res.redirect('/admin?message=Неверные параметры');
   }
   
-  if (action === 'block') {
-    db.run("UPDATE users SET is_blocked = 1 WHERE id = ?", [user_id], (err) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
-      }
-      
+  try {
+    if (action === 'block') {
+      await db.toggleUserBlock(user_id, true);
       res.redirect('/admin?message=Пользователь успешно заблокирован');
-    });
-  } else if (action === 'unblock') {
-    db.run("UPDATE users SET is_blocked = 0 WHERE id = ?", [user_id], (err) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
-      }
-      
+    } else if (action === 'unblock') {
+      await db.toggleUserBlock(user_id, false);
       res.redirect('/admin?message=Пользователь успешно разблокирован');
-    });
-  } else {
-    res.redirect('/admin?message=Неверное действие');
+    } else {
+      res.redirect('/admin?message=Неверное действие');
+    }
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.status(500).send('Ошибка сервера');
   }
 });
 
 // API для управления материалами (админ)
-app.post('/api/admin/materials', requireAdmin, (req, res) => {
+app.post('/api/admin/materials', requireAdmin, async (req, res) => {
   const { action, material_id, category_id, title, content } = req.body;
   
   if (!action) {
     return res.redirect('/admin?message=Неверные параметры');
   }
   
-  if (action === 'add') {
-    if (!category_id || !title || !content) {
-      return res.redirect('/admin?message=Пожалуйста, заполните все поля');
-    }
-    
-    db.get("SELECT id FROM users WHERE is_admin = 1 LIMIT 1", (err, admin) => {
-      if (err || !admin) {
-        console.error('Ошибка базы данных:', err || 'Администратор не найден');
-        return res.status(500).send('Ошибка сервера');
+  try {
+    if (action === 'add') {
+      if (!category_id || !title || !content) {
+        return res.redirect('/admin?message=Пожалуйста, заполните все поля');
       }
       
-      db.run("INSERT INTO materials (category_id, title, content, author_id) VALUES (?, ?, ?, ?)", 
-        [category_id, title, content, admin.id], (err) => {
-        if (err) {
-          console.error('Ошибка базы данных:', err);
-          return res.status(500).send('Ошибка сервера');
-        }
-        
-        res.redirect('/admin?message=Материал успешно добавлен');
-      });
-    });
-  } else if (action === 'delete') {
-    if (!material_id) {
-      return res.redirect('/admin?message=Неверные параметры');
-    }
-    
-    db.run("DELETE FROM materials WHERE id = ?", [material_id], (err) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
+      // Получаем ID администратора
+      const adminUser = await db.getUserByUsername('admin');
+      if (!adminUser) {
+        return res.redirect('/admin?message=Администратор не найден');
       }
       
+      // Добавляем материал
+      await db.addMaterial(category_id, title, content, adminUser.id);
+      res.redirect('/admin?message=Материал успешно добавлен');
+    } else if (action === 'delete') {
+      if (!material_id) {
+        return res.redirect('/admin?message=Неверные параметры');
+      }
+      
+      // Удаляем материал
+      await db.deleteMaterial(material_id);
       res.redirect('/admin?message=Материал успешно удален');
-    });
-  } else {
-    res.redirect('/admin?message=Неверное действие');
+    } else {
+      res.redirect('/admin?message=Неверное действие');
+    }
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.status(500).send('Ошибка сервера');
   }
 });
 
 // API для управления категориями (админ)
-app.post('/api/admin/categories', requireAdmin, (req, res) => {
+app.post('/api/admin/categories', requireAdmin, async (req, res) => {
   const { action, category_id, name, description } = req.body;
   
   if (!action) {
     return res.redirect('/admin?message=Неверные параметры');
   }
   
-  if (action === 'add') {
-    if (!name || !description) {
-      return res.redirect('/admin?message=Пожалуйста, заполните все поля');
-    }
-    
-    db.run("INSERT INTO categories (name, description) VALUES (?, ?)", 
-      [name, description], (err) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
+  try {
+    if (action === 'add') {
+      if (!name || !description) {
+        return res.redirect('/admin?message=Пожалуйста, заполните все поля');
       }
       
+      // Добавляем категорию
+      await db.addCategory(name, description);
       res.redirect('/admin?message=Категория успешно добавлена');
-    });
-  } else if (action === 'delete') {
-    if (!category_id) {
-      return res.redirect('/admin?message=Неверные параметры');
-    }
-    
-    // Удаляем все материалы в этой категории
-    db.run("DELETE FROM materials WHERE category_id = ?", [category_id], (err) => {
-      if (err) {
-        console.error('Ошибка базы данных:', err);
-        return res.status(500).send('Ошибка сервера');
+    } else if (action === 'delete') {
+      if (!category_id) {
+        return res.redirect('/admin?message=Неверные параметры');
       }
       
-      // Удаляем категорию
-      db.run("DELETE FROM categories WHERE id = ?", [category_id], (err) => {
-        if (err) {
-          console.error('Ошибка базы данных:', err);
-          return res.status(500).send('Ошибка сервера');
-        }
-        
-        res.redirect('/admin?message=Категория успешно удалена');
-      });
-    });
-  } else {
-    res.redirect('/admin?message=Неверное действие');
+      // Удаляем категорию и все материалы в ней
+      await db.deleteCategory(category_id);
+      res.redirect('/admin?message=Категория успешно удалена');
+    } else {
+      res.redirect('/admin?message=Неверное действие');
+    }
+  } catch (error) {
+    console.error('Ошибка базы данных:', error);
+    return res.status(500).send('Ошибка сервера');
   }
 });
 
